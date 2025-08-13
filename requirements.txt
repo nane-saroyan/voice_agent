@@ -14,5 +14,8 @@ soundfile==0.12.*
 # Core libs
 numpy==1.26.*
 
+# UI
+gradio==4.44.*
+
 # Optional (if you use OpenAI)
 openai==1.40.*
