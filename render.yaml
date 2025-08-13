@@ -1,0 +1,52 @@
+services:
+  # --- Backend: FastAPI + ASR/TTS ---
+  - name: arm-voice-backend
+    type: pserv
+    runtime: docker
+    region: frankfurt
+    plan: standard
+    rootDir: .
+    dockerfilePath: backend/Dockerfile
+    dockerContext: .
+    dockerCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    disk:
+      name: models
+      mountPath: /opt/models
+      sizeGB: 15
+    envVars:
+      - key: LLM_PROVIDER
+        value: openai
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: OPENAI_API_KEY
+        sync: false   # you'll be asked for the secret on first deploy
+      - key: ASR_MODEL
+        value: medium
+      # Make all model caches persistent on the attached disk:
+      - key: XDG_CACHE_HOME
+        value: /opt/models/cache
+      - key: TTS_HOME
+        value: /opt/models/tts
+      - key: HF_HOME
+        value: /opt/models/hf
+
+  # --- Frontend: Gradio UI ---
+  - name: arm-voice-frontend
+    type: web
+    runtime: python
+    region: frankfurt
+    plan: free
+    rootDir: .
+    buildCommand: pip install -r frontend/requirements.txt
+    startCommand: python frontend/gradio_app.py
+    healthCheckPath: /
+    envVars:
+      # Render injects the backend's private host:port here
+      - key: BACKEND_HOSTPORT
+        fromService:
+          name: arm-voice-backend
+          type: pserv
+          property: hostport
+      - key: GRADIO_SERVER_NAME
+        value: 0.0.0.0
