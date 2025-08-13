@@ -1,9 +1,18 @@
 fastapi==0.112.*
 uvicorn[standard]==0.30.*
+pydantic==2.*
+python-multipart==0.0.9
+
+# ASR
 faster-whisper==1.0.*
 ctranslate2==4.5.*
-torch==2.3.*           # CPU build is fine; upgrade if you enable GPU
+
+# TTS
 TTS==0.22.*
 soundfile==0.12.*
-python-multipart==0.0.9
-pydantic==2.*
+
+# Core libs
+numpy==1.26.*
+
+# Optional (if you use OpenAI)
+openai==1.40.*
