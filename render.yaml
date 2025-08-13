@@ -3,21 +3,7 @@ services:
     type: web
     plan: free
     region: frankfurt
-    runtime: docker
-    dockerfilePath: backend/Dockerfile
-    dockerContext: backend
-    dockerCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /healthz
-    envVars:
-      - key: ASR_MODEL
-        value: small           # small → faster on free CPU; try medium/large-v3 if you upgrade
-      - key: LLM_PROVIDER
-        value: openai          # or "local" to use the fallback stub
-      - key: OPENAI_MODEL
-        value: gpt-4o-mini
-      - key: OPENAI_API_KEY
-        sync: false            # set this secret in Render
-      - key: TTS_MODEL_NAME
-        value: tts_models/multilingual/multi-dataset/xtts_v2
-      - key: COQUI_TOS_AGREED
-        value: "1"
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
