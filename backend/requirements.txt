@@ -1,0 +1,9 @@
+fastapi==0.112.*
+uvicorn[standard]==0.30.*
+faster-whisper==1.0.*
+ctranslate2==4.5.*
+torch==2.3.*           # CPU build is fine; upgrade if you enable GPU
+TTS==0.22.*
+soundfile==0.12.*
+python-multipart==0.0.9
+pydantic==2.*
