@@ -167,24 +167,28 @@ async def voice_turn(audio: UploadFile = File(...)):
 import gradio as gr
 import tempfile
 
+def _silence(sr=22050, sec=0.5) -> Tuple[int, np.ndarray]:
+    n = int(sr * sec)
+    return sr, np.zeros(n, dtype=np.float32)
+
 def _gradio_turn(mic_audio: Tuple[int, np.ndarray]):
     """
-    ASR → LLM → TTS, returns (reply text, reply audio) for the UI.
-    Output audio MUST be (sample_rate, np.ndarray) for Gradio.
+    ASR → LLM → TTS
+    Returns:
+      - reply text (str)
+      - reply audio (sr:int, np.ndarray)  # NEVER None/bool/raw-bytes
     """
     try:
-        if mic_audio is None or (
-            isinstance(mic_audio, tuple) and len(mic_audio) == 2 and mic_audio[0] is None
-        ):
-            return "Չկա միկրոֆոնի ձայնագրություն։", None
-
+        # Validate input
+        if not mic_audio or not isinstance(mic_audio, tuple) or len(mic_audio) != 2:
+            return "Չկա միկրոֆոնի ձայնագրություն։", _silence()
         sr, y = mic_audio
-        if y is None:
-            return "Չկա միկրոֆոնի ձայնագրություն։", None
+        if y is None or isinstance(y, bool):
+            return "Չկա միկրոֆոնի ձայնագրություն։", _silence()
 
-        # Write a temp WAV so faster-whisper gets a standard file path
+        # Save a temporary WAV for Whisper
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            sf.write(tmp, y, sr, format="WAV", subtype="PCM_16")
+            sf.write(tmp, y, int(sr), format="WAV", subtype="PCM_16")
             tmp_path = tmp.name
 
         # ASR
@@ -195,22 +199,24 @@ def _gradio_turn(mic_audio: Tuple[int, np.ndarray]):
         # LLM
         reply_text = llm_reply(user_text)
 
-        # TTS → return numpy audio (not bytes)
+        # TTS -> numpy waveform
         tts = get_tts()
         wav_np = tts.tts(text=reply_text, speaker_wav=REFERENCE_SPEAKER_WAV or None, language="hy")
 
-        # Ensure expected dtype for Gradio
-        if not isinstance(wav_np, np.ndarray):
-            # Coerce from list or other iterable if needed
-            wav_np = np.array(wav_np, dtype=np.float32)
-        else:
+        # Coerce to the exact dtype/shape Gradio expects
+        if isinstance(wav_np, (list, tuple)):
+            wav_np = np.asarray(wav_np, dtype=np.float32)
+        elif isinstance(wav_np, np.ndarray):
             wav_np = wav_np.astype(np.float32, copy=False)
+        else:
+            # Unexpected type (e.g., num/str/bool) -> return silence
+            return f"Սխալ տեղի ունեցավ․ սխալ ձայնային ֆորմատ ({type(wav_np).__name__})", _silence()
 
         return reply_text, (22050, wav_np)
 
     except Exception as e:
-        # Surface a readable error in the textbox; no stack trace in UI
-        return f"Սխալ տեղի ունեցավ․ {type(e).__name__}: {e}", None
+        # Return readable message + valid audio tuple (silence) to keep Gradio happy
+        return f"Սխալ տեղի ունեցավ․ {type(e).__name__}: {e}", _silence()
 
 with gr.Blocks(title="🇦🇲 Զրուցակից՝ հոգեկան առողջության աջակցման համար") as demo:
     gr.Markdown(
@@ -221,12 +227,12 @@ with gr.Blocks(title="🇦🇲 Զրուցակից՝ հոգեկան առողջո�
     reply_text = gr.Textbox(label="Պատասխան (տեքստ)")
     reply_audio = gr.Audio(label="Պատասխան (ձայն)", autoplay=True)
 
-    # 🚫 Do NOT output the mic component itself — only text + audio
+    # Only two outputs: text + audio. Do NOT return the mic component itself.
     gr.Button("Ուղարկել ձայնային շրջանը").click(
         _gradio_turn,
         inputs=mic,
         outputs=[reply_text, reply_audio],
     )
 
-# Mount UI at "/" so your service root shows the app.
+# Mount UI at "/"
 app = gr.mount_gradio_app(app, demo, path="/")
