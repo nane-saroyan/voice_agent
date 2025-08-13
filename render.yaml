@@ -1,50 +1,26 @@
 services:
-  # --- Backend: FastAPI + ASR/TTS (private) ---
   - name: arm-voice-backend
-    type: pserv
+    type: web          # not pserv
     runtime: docker
+    plan: free
     region: frankfurt
-    plan: standard
-    rootDir: .
     dockerfilePath: backend/Dockerfile
     dockerContext: .
     dockerCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
-    # healthCheckPath: /   # ❌ REMOVE this line for pserv
-    disk:
-      name: models
-      mountPath: /opt/models
-      sizeGB: 15
-    envVars:
-      - key: LLM_PROVIDER
-        value: openai
-      - key: OPENAI_MODEL
-        value: gpt-4o-mini
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: ASR_MODEL
-        value: medium
-      - key: XDG_CACHE_HOME
-        value: /opt/models/cache
-      - key: TTS_HOME
-        value: /opt/models/tts
-      - key: HF_HOME
-        value: /opt/models/hf
 
-  # --- Frontend: Gradio (public) ---
   - name: arm-voice-frontend
     type: web
     runtime: python
-    region: frankfurt
     plan: free
+    region: frankfurt
     rootDir: .
     buildCommand: pip install -r frontend/requirements.txt
     startCommand: python frontend/gradio_app.py
-    healthCheckPath: /         # ✅ allowed on web services
     envVars:
       - key: BACKEND_HOSTPORT
         fromService:
           name: arm-voice-backend
-          type: pserv
-          property: hostport    # private networking host:port
+          type: web
+          property: hostport
       - key: GRADIO_SERVER_NAME
         value: 0.0.0.0
