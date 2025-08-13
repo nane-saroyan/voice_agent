@@ -165,44 +165,68 @@ async def voice_turn(audio: UploadFile = File(...)):
 
 # ===== Gradio UI mounted on the same app (free-tier friendly) =====
 import gradio as gr
+import tempfile
 
 def _gradio_turn(mic_audio: Tuple[int, np.ndarray]):
     """
-    Gradio handler that runs ASR → LLM → TTS in-process (no HTTP hop),
-    returns (input echo, reply text, reply audio) for the UI.
+    ASR → LLM → TTS, returns (reply text, reply audio) for the UI.
+    Output audio MUST be (sample_rate, np.ndarray) for Gradio.
     """
-    if mic_audio is None:
-        return None, "Չկա միկրոֆոնի ձայնագրություն։", None
+    try:
+        if mic_audio is None or (
+            isinstance(mic_audio, tuple) and len(mic_audio) == 2 and mic_audio[0] is None
+        ):
+            return "Չկա միկրոֆոնի ձայնագրություն։", None
 
-    sr, y = mic_audio
-    # Encode temp wav for ASR (reuse the same transcribe path)
-    buf = io.BytesIO()
-    sf.write(buf, y, sr, format="WAV", subtype="PCM_16")
-    buf.seek(0)
+        sr, y = mic_audio
+        if y is None:
+            return "Չկա միկրոֆոնի ձայնագրություն։", None
 
-    # Use the programmatic /voice-turn codepath directly for quality parity
-    # (Re-run the logic inline to avoid HTTP dependency)
-    asr = get_asr()
-    segments, _info = asr.transcribe(io.BytesIO(buf.getvalue()), language="hy", vad_filter=True)
-    user_text = " ".join(seg.text for seg in segments).strip()
+        # Write a temp WAV so faster-whisper gets a standard file path
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            sf.write(tmp, y, sr, format="WAV", subtype="PCM_16")
+            tmp_path = tmp.name
 
-    reply_text = llm_reply(user_text)
+        # ASR
+        asr = get_asr()
+        segments, _info = asr.transcribe(tmp_path, language="hy", vad_filter=True)
+        user_text = " ".join(seg.text for seg in segments).strip()
 
-    tts = get_tts()
-    wav = tts.tts(text=reply_text, speaker_wav=REFERENCE_SPEAKER_WAV or None, language="hy")
-    audio_bytes = wav_bytes_from_numpy(wav, sr=22050)
+        # LLM
+        reply_text = llm_reply(user_text)
 
-    return (sr, y), reply_text, (22050, audio_bytes)
+        # TTS → return numpy audio (not bytes)
+        tts = get_tts()
+        wav_np = tts.tts(text=reply_text, speaker_wav=REFERENCE_SPEAKER_WAV or None, language="hy")
+
+        # Ensure expected dtype for Gradio
+        if not isinstance(wav_np, np.ndarray):
+            # Coerce from list or other iterable if needed
+            wav_np = np.array(wav_np, dtype=np.float32)
+        else:
+            wav_np = wav_np.astype(np.float32, copy=False)
+
+        return reply_text, (22050, wav_np)
+
+    except Exception as e:
+        # Surface a readable error in the textbox; no stack trace in UI
+        return f"Սխալ տեղի ունեցավ․ {type(e).__name__}: {e}", None
 
 with gr.Blocks(title="🇦🇲 Զրուցակից՝ հոգեկան առողջության աջակցման համար") as demo:
     gr.Markdown(
-        "### Բարև․ սա փորձարարական ձայնային զրուցակից է հոգեկան բարեկեցության աջակցության համար.\n"
+        "### Բարև․ սա փորձարարական ձայնային զրուցակից է հոգեկան բարեկեցության համար.\n"
         "**Չի փոխարինում մասնագետին**։ Վթարային իրավիճակում զանգահարեք **112**։"
     )
     mic = gr.Audio(sources=["microphone"], type="numpy", label="Խոսեք և բաց թողեք…")
     reply_text = gr.Textbox(label="Պատասխան (տեքստ)")
     reply_audio = gr.Audio(label="Պատասխան (ձայն)", autoplay=True)
-    gr.Button("Ուղարկել ձայնային շրջանը").click(_gradio_turn, inputs=mic, outputs=[mic, reply_text, reply_audio])
+
+    # 🚫 Do NOT output the mic component itself — only text + audio
+    gr.Button("Ուղարկել ձայնային շրջանը").click(
+        _gradio_turn,
+        inputs=mic,
+        outputs=[reply_text, reply_audio],
+    )
 
 # Mount UI at "/" so your service root shows the app.
 app = gr.mount_gradio_app(app, demo, path="/")
